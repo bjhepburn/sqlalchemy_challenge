@@ -3,7 +3,7 @@ import sqlalchemy
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, func
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import numpy as np
 import pandas as pd
 import datetime as dt
@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 #################################################
 # Database Setup
 #################################################
-engine = create_engine("sqlite:///../Resources/hawaii.sqlite")
+engine = create_engine("sqlite:///Resources/hawaii.sqlite")
 
 # reflect an existing database into a new model
 Base = automap_base()
@@ -49,25 +49,51 @@ def welcome():
 def precipitation():
     session = Session(engine)
     latest_date = session.query(Measurement.date).order_by(Measurement.date.desc()).first()[0]
-    print(f'The most recent data was collected on {latest_date}')
-    # Calculate the date one year from the last date in data set.
+    query_date = dt.date(2017,8,23) - dt.timedelta(days = 365)
+    recent_12_months = session.query(Measurement.date,Measurement.prcp).filter(Measurement.date >= query_date).all()
+    year = list(np.ravel(recent_12_months))
+    return jsonify(year)
+
+@app.route("/api/v1.0/stations")
+def stations():
+    session = Session(engine)
+    island_stations = session.query(Measurement.station).distinct()
+    isle_stations = [station[0] for station in island_stations]
+    return jsonify(isle_stations)
+
+@app.route("/api/v1.0/tobs")
+def tobs():
+    session = Session(engine)
+
     query_date = dt.date(2017,8,23) - dt.timedelta(days = 365)
 
-# Perform a query to retrieve the data and precipitation scores
-    recent_12_months = session.query(Measurement.station,Measurement.date,Measurement.prcp).filter(Measurement.date >= query_date).all()
+    active_station = session.query(Measurement.station, func.count(Measurement.station))\
+    .group_by(Measurement.station).order_by(func.count(Measurement.station).desc()).all()[0][0]
 
-# Save the query results as a Pandas DataFrame and set the index to the date column
-    df = pd.DataFrame(recent_12_months).set_index('date')
+    station_tobs = session.query(Measurement.date, Measurement.tobs).filter(Measurement.station == active_station).\
+    filter(Measurement.date >= query_date).group_by(Measurement.tobs).all()
 
-# Sort the dataframe by date
-    df = df.sort_index()
+    tobs_list = list(np.ravel(station_tobs))
 
-# Use Pandas Plotting with Matplotlib to plot the data
-    df.plot(y='prcp', figsize=(12,6))
-    plt.legend(['Precipitation'])
-    plt.xlabel('Date')
-    plt.ylabel('Inches')
+    return jsonify(tobs_list)
 
+@app.route("/api/v1.0/<path:date>")
+def start(date):
+    session = Session(engine)
+    data ={}
+    data['min'] = session.query(func.min(Measurement.tobs)).filter(Measurement.date >= date).all()[0][0]
+    data['max'] = session.query(func.max(Measurement.tobs)).filter(Measurement.date >= date).all()[0][0]
+    data['avg'] = session.query(func.avg(Measurement.tobs)).filter(Measurement.date >= date).all()[0][0]
+    return jsonify(data)
+
+@app.route("/api/v1.0/<date>/<end_date>")
+def range(date, end_date):
+    session = Session(engine)
+    data ={}
+    data['min'] = session.query(func.min(Measurement.tobs)).filter(Measurement.date >= date).filter(Measurement.date <= end_date).all()[0][0]
+    data['max'] = session.query(func.max(Measurement.tobs)).filter(Measurement.date >= date).filter(Measurement.date <= end_date).all()[0][0]
+    data['avg'] = session.query(func.avg(Measurement.tobs)).filter(Measurement.date >= date).filter(Measurement.date <= end_date).all()[0][0]
+    return jsonify(data)
 
 if __name__ == "__main__":
     app.run(debug=True)
